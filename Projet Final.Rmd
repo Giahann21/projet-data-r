@@ -1,0 +1,726 @@
+---
+title: "test"
+output: html_document
+date: "2025-04-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+```{r}
+library(tidyverse)
+library(wooldridge)
+library(AER)
+library(stargazer)
+library(fixest)
+```
+```{r}
+library(readr)
+library(dplyr)
+library(haven)
+```
+
+```{r}
+offres_emploi_metier <- read.csv2("/Users/handinh/Downloads/Projet econometrie2/offres_emploi_metier.csv")
+```
+```{r}
+offres_durabilite <- read.csv2("/Users/handinh/Downloads/Projet econometrie2/offres_durabilite.csv")
+```
+
+```{r}
+demandes_emploi_metier <- read.csv2("/Users/handinh/Downloads/Projet econometrie2/demandes_emploi_metier.csv")
+```
+
+```{r}
+demandes_emploi_niveau_etude <- read.csv2("/Users/handinh/Downloads/Projet econometrie2/demandes_emploi_niveau_etude.csv")
+```
+
+```{r}
+demandes_emploi_age <- read.csv2("/Users/handinh/Downloads/Projet econometrie2/demandes_emploi_age.csv")
+```
+
+```{r}
+liste_identifiant <- read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_coherence_item_v458_utf8.csv")
+```
+
+```{r}
+grand_domaine <-read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_cr_gd_dp_v458_utf8.csv")
+```
+
+
+```{r}
+competences <- read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_referentiel_competence_v458_utf8.csv")
+```
+```{r}
+savoir_faire <- read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_referentiel_savoir_v458_utf8.csv")
+```
+```{r}
+contexte_travail <- read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_referentiel_contexte_travail_v458_utf8.csv")
+```
+```{r}
+donnees_rome <- read_csv("/Users/handinh/Downloads/RefRomeCsv/unix_referentiel_code_rome_v458_utf8.csv")
+```
+```{r}
+demandes_emploi_metier$Métier <- sub("^(\\w+)\\s*:.*$", "\\1", demandes_emploi_metier$Métier)
+```
+```{r}
+offres_emploi_metier$Métier <- sub("^(\\w+)\\s*:.*$", "\\1", offres_emploi_metier$Métier)
+```
+```{r}
+offres_durabilite$Type.de.contrat <- sub("^(\\w+)\\s*:.*$", "\\1", offres_durabilite$Type.de.contrat)
+```
+```{r}
+# 1. Nettoyer les colonnes si besoin (supprimer espaces, convertir en numérique)
+offres_durabilite <- offres_durabilite %>%
+  mutate(
+    Offre.durable = as.numeric(gsub(" ", "", Offre.durable)),
+    Offre.non.durable = as.numeric(gsub(" ", "", Offre.non.durable)),
+    taux_durabilite = Offre.durable / (Offre.durable + Offre.non.durable)
+  )
+
+# 2. Renommer la colonne pour joindre proprement
+offres_durabilite <- offres_durabilite %>%
+  rename(code_rome = Type.de.contrat)
+
+```
+
+
+```{r}
+# Renommer les colonnes en gardant uniquement la partie avant le premier point
+names(demandes_emploi_niveau_etude)[-1] <- gsub("\\..*", "", names(demandes_emploi_niveau_etude)[-1])
+```
+```{r}
+names(demandes_emploi_age)[-1] <- gsub("\\..*", "", names(demandes_emploi_age)[-1])
+```
+
+
+
+```{r}
+# On récupère le domaine professionnel pour chaque métier
+metiers_domaines <- liste_identifiant %>%
+  left_join(grand_domaine[, c("code_rome", "code_domaine_professionel", "libelle_domaine_professionel")], by = "code_rome") %>%
+  left_join(donnees_rome[, c("code_rome", "libelle_rome")], by = "code_rome")
+```
+
+```{r}
+# Joindre les compétences selon code_ogr
+metiers_competences <- merge(metiers_domaines, competences[, c("code_ogr", "libelle_competence", "sous_cat_comp")],
+                             by = "code_ogr", all.x = TRUE)
+```
+```{r}
+# Joindre les savoirs en utilisant code_ogr <-> code_ogr_savoir
+metiers_savoirs <- merge(metiers_competences, savoir_faire[, c("code_ogr_savoir", "libelle_savoir", "categorie_savoir")],
+                         by.x = "code_ogr", by.y = "code_ogr_savoir", all.x = TRUE)
+```
+```{r}
+# Joindre les contextes du travail 
+metiers_final <- merge(
+  metiers_savoirs,
+  contexte_travail[, c("code_ogr", "libelle_cont_travail", "code_type_cont_trav", "libelle_type_cont_trav")],
+  by = "code_ogr",
+  all.x = TRUE
+)
+```
+
+```{r}
+metiers_final <- metiers_final %>%
+  mutate(contrainte_forte = if_else(
+    libelle_type_cont_trav %in% c("Conditions de travail et risques professionnels",
+                                  "Horaires et durée du travail"),
+    1, 0
+  ))
+```
+
+
+#Nombre total de métiers analysés:
+```{r}
+n_distinct(metiers_final$code_rome)
+```
+#Nombre de domaines professionel
+```{r}
+n_distinct(metiers_final$code_domaine_professionel)
+```
+
+#Nombre moyen de compétences par métier
+```{r}
+metiers_final %>%
+  filter(!is.na(libelle_competence)) %>%
+  group_by(code_rome) %>%
+  summarise(n_comp = n_distinct(libelle_competence)) %>%
+  summarise(moyenne = mean(n_comp), mediane = median(n_comp), min = min(n_comp), max = max(n_comp))
+```
+#Nombre moyen de savoirs par métier
+```{r}
+metiers_final %>%
+  filter(!is.na(libelle_savoir)) %>%
+  group_by(code_rome) %>%
+  summarise(n_savoirs = n_distinct(libelle_savoir)) %>%
+  summarise(moyenne = mean(n_savoirs), mediane = median(n_savoirs), min = min(n_savoirs), max = max(n_savoirs))
+```
+#Nombre moyen de contextes de travail par métier
+```{r}
+metiers_final %>%
+  filter(!is.na(libelle_cont_travail)) %>%
+  group_by(code_rome) %>%
+  summarise(n_contextes = n_distinct(libelle_cont_travail)) %>%
+  summarise(moyenne = mean(n_contextes), mediane = median(n_contextes), min = min(n_contextes), max = max(n_contextes))
+```
+#Les compétences les plus fréquentes
+```{r}
+metiers_final %>%
+  filter(!is.na(libelle_competence)) %>%
+  count(libelle_competence, sort = TRUE) %>%
+  slice_max(order_by =n, n = 10)
+```
+#Nombre de métiers par domaine professionel
+```{r}
+domaine_metier <- metiers_final %>%
+  select(code_rome, code_domaine_professionel, libelle_domaine_professionel) %>%
+  distinct() %>%
+  count(code_domaine_professionel, libelle_domaine_professionel, sort = TRUE) %>%
+  slice_max(order_by = n, n = 20)
+print(domaine_metier)
+```
+```{r}
+# Supposons que ton tableau est dans un objet appelé domaine_metiers
+g6 <- ggplot(domaine_metier, aes(x = reorder(libelle_domaine_professionel, n), y = n)) +
+  geom_col(fill = "#1f78b4") +
+  coord_flip() +
+  labs(
+    title = "Nombre de métiers par domaine professionnel",
+    x = "Domaine professionnel",
+    y = "Nombre de métiers"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+metiers_final %>%
+  filter(!is.na(contrainte_forte)) %>%
+  group_by(code_rome) %>%
+  summarise(n_contrainte_forte = sum(contrainte_forte, na.rm = TRUE)) %>%
+  summarise(moyenne = mean(n_contrainte_forte), mediane = median(n_contrainte_forte), min = min(n_contrainte_forte), max = max(n_contrainte_forte))
+```
+
+
+# Des métiers à contrainte forte par métier
+```{r}
+top_contraintes <- metiers_final %>%
+  group_by(code_rome, libelle_rome) %>%
+  summarise(n_contraintes_fortes = sum(contrainte_forte, na.rm = TRUE)) %>%
+  arrange(desc(n_contraintes_fortes)) %>%
+  head(10)
+```
+
+
+```{r}
+g8 <- ggplot(top_contraintes, aes(x = reorder(libelle_rome, n_contraintes_fortes), y = n_contraintes_fortes)) +
+  geom_col(fill = "#e74c3c") +
+  coord_flip() +
+  labs(
+    title = "Top 10 des métiers avec le plus de contraintes fortes",
+    x = "Métiers",
+    y = "Nombre de contraintes fortes"
+  ) +
+  theme_minimal(base_size = 13)
+```
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top10_metier_contrainte_forte.png", plot = g8, width = 15, height = 8, dpi = 300)
+```
+
+```{r}
+resume_metiers <- metiers_final %>%
+  group_by(code_rome, code_domaine_professionel, libelle_domaine_professionel) %>%
+  summarise(
+    n_comp = n_distinct(libelle_competence),
+    n_tech = n_distinct(libelle_competence[sous_cat_comp == "Technique"]),
+    n_tech_expert = n_distinct(libelle_competence[sous_cat_comp == "Technique expert"]),
+    n_transverse = n_distinct(libelle_competence[sous_cat_comp == "Transverse"]),
+    n_savoirs = n_distinct(libelle_savoir),
+    n_contextes = n_distinct(libelle_cont_travail),
+    n_contrainte_forte = sum(contrainte_forte, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+resume_metiers <- resume_metiers %>%
+  left_join(demandes_emploi_metier, by = c("code_rome" = "Métier"))
+```
+
+```{r}
+resume_metiers <- resume_metiers %>%
+  left_join(offres_emploi_metier, by = c("code_rome" = "Métier")) 
+```
+
+#Calculer le taux de tension
+```{r}
+resume_metiers <- resume_metiers %>%
+  mutate(
+    Offres.d.emploi = as.numeric(gsub(" ", "", Offres.d.emploi)),
+    Demandeurs = as.numeric(gsub(" ", "", Demandeurs)),
+    taux_tension = ifelse(is.na(Offres.d.emploi) | is.na(Demandeurs) | Demandeurs == 0,
+                          NA,
+                          Offres.d.emploi / Demandeurs)
+  )
+```
+
+```{r}
+resume_metiers <- resume_metiers %>%
+  left_join(offres_durabilite[, c("code_rome", "taux_durabilite")], by = "code_rome")
+```
+
+#Filtrer la tranche d'âge dominante de chaque métier
+```{r}
+# Étape 1 : Nettoyer les données
+df_age_numeric <- apply(demandes_emploi_age[, -1], 2, function(x) as.numeric(gsub(" ", "", x)))
+
+# Étape 2 : Récupérer les tranches d'âge
+tranches_age <- demandes_emploi_age[[1]]
+
+# Étape 3 : Trouver l’index du max par colonne
+indices_max_age <- apply(df_age_numeric, 2, which.max)
+
+# Étape 4 : Associer chaque métier à sa tranche d’âge dominante
+resultat_age <- data.frame(
+  Metier = colnames(df_age_numeric),
+  tranche_age_dominante = tranches_age[indices_max_age]
+)
+
+# Affichage
+print(resultat_age)
+```
+
+#Filtrer le niveau étude dominant de chaque métier
+```{r}
+df_niveau_etude_numeric <- apply(demandes_emploi_niveau_etude[, -1], 2, function(x) as.numeric(gsub(" ", "", x)))
+```
+```{r}
+# Étape 2 : Récupérer les noms des niveaux d’études depuis la première colonne
+niveaux_etude <- demandes_emploi_niveau_etude[[1]]
+
+# Étape 3 : Trouver, pour chaque colonne (métier), l’index du max (donc le niveau dominant)
+indices_max <- apply(df_niveau_etude_numeric, 2, which.max)
+
+# Étape 4 : Associer chaque métier à son niveau dominant
+resultat <- data.frame(
+  Metier = colnames(df_niveau_etude_numeric),
+  niveau_etude_dominant = niveaux_etude[indices_max]
+)
+```
+
+
+```{r}
+# Harmoniser les noms de colonnes
+colnames(resultat)[1] <- "code_rome"
+colnames(resultat_age)[1] <- "code_rome"
+```
+
+```{r}
+resume_metiers <- resume_metiers %>%
+  left_join(resultat, by = "code_rome") %>%
+  left_join(resultat_age, by = "code_rome")
+```
+
+```{r}
+names(resume_metiers)
+```
+
+
+
+```{r}
+mod1 <- lm(taux_tension  ~ n_tech + n_tech_expert + n_transverse + n_contrainte_forte + taux_durabilite , data = resume_metiers)
+stargazer(mod1, type = "text")
+```
+```{r}
+mod2 <- lm(taux_tension ~ n_comp + n_savoirs + n_contextes + n_contrainte_forte + taux_durabilite + tranche_age_dominante, data = resume_metiers)
+stargazer(mod1, mod2, type = "text")
+```
+
+
+```{r}
+mod3 <- lm(taux_tension ~ 
+             n_tech + 
+             n_tech_expert + 
+             n_transverse + 
+             n_contrainte_forte +
+             taux_durabilite+
+             tranche_age_dominante +
+             niveau_etude_dominant,
+           data = resume_metiers)
+stargazer(mod1, mod2, mod3, type = "text")
+```
+
+
+#Test de multicolinéarité
+```{r}
+library(car)
+vif(mod3)
+```
+
+#Test de forme fonctionnelle
+```{r}
+library(lmtest)
+resettest(mod3)
+```
+```{r}
+#p-value = 0.4 > 0.05 -> Forme fonctionnelle correcte
+```
+
+#Test d'hétérosdasticité
+```{r}
+bptest(mod3)
+```
+```{r}
+#p-value = 0.28 > 0.05 -> le résidu du modèle sont globalement homogènes
+```
+
+
+```{r}
+plot(residuals(mod3))                # Résidus  # Homoscédasticité
+```
+
+```{r}
+resume_metiers <- resume_metiers %>%
+  filter(!is.na(taux_tension),
+         !is.infinite(taux_tension),
+         !is.na(taux_durabilite),
+         !is.infinite(taux_durabilite),
+         !is.na(n_contrainte_forte))  # etc. selon les variables
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(resume_metiers, aes(x = n_contrainte_forte, y = taux_tension)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Taux de tension vs contraintes fortes",
+       x = "Moyenne de contraintes fortes",
+       y = "Taux de tension")
+```
+```{r}
+ggplot(resume_metiers, aes(x = n_tech_expert, y = taux_tension)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Tension vs compétences techniques expertes",
+       x = "Compétences expertes moyennes",
+       y = "Taux de tension")
+```
+```{r}
+resume_metiers <- resume_metiers %>%
+  left_join(donnees_rome, by = "code_rome")
+```
+
+#Nombre de métiers le plus demandeurs
+```{r}
+library(ggplot2)
+
+# Sélection des 20 premiers
+top_20_demandeurs <- resume_metiers %>%
+  slice_max(order_by = Demandeurs, n = 20)
+```
+
+
+```{r}
+library(dplyr)
+
+# Renommer les colonnes pour plus de lisibilité dans le graphique
+df_plot <- top_20_demandeurs %>%
+  rename(
+    metier = libelle_rome,
+    condition_travail = n_contrainte_forte,
+    niveau_etude = niveau_etude_dominant,
+    tranche_age = tranche_age_dominante
+  )
+```
+
+```{r}
+g1 <- ggplot(df_plot, aes(x = Demandeurs, y = reorder(metier, Demandeurs))) +
+  geom_col(aes(fill = condition_travail)) +
+  geom_text(aes(label = paste(niveau_etude, "-", tranche_age)),
+            hjust = -0.05, size = 3.2, color = "black") +
+  scale_fill_gradient(low = "#fef0d9", high = "#d7301f") +
+  labs(
+    title = "Top 20 métiers selon le nombre de demandeurs d’emploi",
+    x = "Nombre de demandeurs",
+    y = "Métier",
+    fill = "Condition du travail"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.15)))
+```
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top20_metiers.png", plot = g1, width = 25, height = 8, dpi = 300)
+```
+
+#Top 20 métier qui ont le taux de tension le plus élevé
+
+```{r}
+top_20_taux_tension <- resume_metiers %>%
+  slice_max(order_by = taux_tension, n = 20)
+```
+
+```{r}
+df_plot2 <- top_20_taux_tension %>%
+  rename(
+    metier = libelle_rome,
+    condition_travail = n_contrainte_forte,
+    niveau_etude = niveau_etude_dominant,
+    tranche_age = tranche_age_dominante
+  )
+```
+
+
+```{r}
+g2 <- ggplot(df_plot2, aes(x = taux_tension, y = reorder(metier, taux_tension))) +
+  geom_col(aes(fill = condition_travail)) +
+  geom_text(aes(label = paste(niveau_etude, "-", tranche_age)),
+            hjust = -0.05, size = 3.2, color = "black") +
+  scale_fill_gradient(low = "#fef0d9", high = "#d7301f") +
+  labs(
+    title = "Top 20 métiers selon le taux de tension le plus élevé",
+    x = "Taux de tension",
+    y = "Métier",
+    fill = "Condition du travail"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.15)))
+```
+
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top20_taux_tension_eleve.png", plot = g2, width = 28, height = 8, dpi = 300)
+```
+
+#Top 20 métiers avec le taux de durabilité plus élevé
+```{r}
+top_20_taux_durabilite <- resume_metiers %>%
+  slice_max(order_by = taux_durabilite, n = 20)
+```
+
+```{r}
+df_plot3 <- top_20_taux_durabilite %>%
+  rename(
+    metier = libelle_rome,
+    condition_travail = n_contrainte_forte,
+    niveau_etude = niveau_etude_dominant,
+    tranche_age = tranche_age_dominante
+  )
+```
+
+```{r}
+g3 <- ggplot(df_plot3, aes(x = taux_durabilite, y = reorder(metier, taux_durabilite))) +
+  geom_col(aes(fill = condition_travail)) +
+  geom_text(aes(label = paste(niveau_etude, "-", tranche_age)),
+            hjust = -0.05, size = 3.2, color = "black") +
+  scale_fill_gradient(low = "#fef0d9", high = "#d7301f") +
+  labs(
+    title = "Top 20 métiers selon le taux de durabilité le plus élevé",
+    x = "Taux de durabilité",
+    y = "Métier",
+    fill = "Condition du travail"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.15)))
+```
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top20_taux_durabilite_eleve.png", plot = g3, width = 28, height = 8, dpi = 300)
+```
+
+#Top 20 métiers avec le plus nombre de techniques experts 
+```{r}
+top_20_n_tech_expert <- resume_metiers %>%
+  slice_max(order_by = n_tech_expert, n = 20)
+```
+
+```{r}
+df_plot4 <- top_20_n_tech_expert %>%
+  rename(
+    metier = libelle_rome,
+    condition_travail = n_contrainte_forte,
+    niveau_etude = niveau_etude_dominant,
+    tranche_age = tranche_age_dominante
+  )
+```
+
+```{r}
+g4 <- ggplot(df_plot4, aes(x = n_tech_expert, y = reorder(metier, n_tech_expert))) +
+  geom_col(aes(fill = condition_travail)) +
+  geom_text(aes(label = paste(niveau_etude, "-", tranche_age)),
+            hjust = -0.05, size = 3.2, color = "black") +
+  scale_fill_gradient(low = "#fef0d9", high = "#d7301f") +
+  labs(
+    title = "Top 20 métiers selon le nombre de techniques experts le plus élevé",
+    x = "Nombre de techniques experts",
+    y = "Métier",
+    fill = "Condition du travail"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.15)))
+```
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top20_n_tech_expert.png", plot = g4, width = 28, height = 8, dpi = 300)
+```
+
+#Top 20 métiers le plus offres
+```{r}
+top_20_offres <- resume_metiers %>%
+  slice_max(order_by = Offres.d.emploi, n = 20)
+```
+
+
+```{r}
+# Renommer les colonnes pour plus de lisibilité dans le graphique
+df_plot5 <- top_20_offres %>%
+  rename(
+    metier = libelle_rome,
+    condition_travail = n_contrainte_forte,
+    niveau_etude = niveau_etude_dominant,
+    tranche_age = tranche_age_dominante
+  )
+```
+
+```{r}
+g5 <- ggplot(df_plot5, aes(x = Offres.d.emploi, y = reorder(metier, Offres.d.emploi))) +
+  geom_col(aes(fill = condition_travail)) +
+  geom_text(aes(label = paste(niveau_etude, "-", tranche_age)),
+            hjust = -0.05, size = 3.2, color = "black") +
+  scale_fill_gradient(low = "#fef0d9", high = "#d7301f") +
+  labs(
+    title = "Top 20 métiers selon le nombre de demandeurs d’emploi",
+    x = "Nombre d'offres",
+    y = "Métier",
+    fill = "Condition du travail"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9)
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.10)))
+```
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_top20_metiers_plus_offres.png", plot = g5, width = 25, height = 8, dpi = 300)
+```
+
+#Heatmap de corrélation
+```{r}
+library(corrplot)
+cor_mat <- cor(resume_metiers[, c("taux_tension", "n_tech", "n_transverse", "n_tech_expert", "n_contextes", "n_contrainte_forte","taux_durabilite")], use = "complete.obs")
+corrplot(cor_mat, method = "color", type = "upper")
+```
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/correlation_heatmap.png", plot = g9, width = 25, height = 8, dpi = 300)
+```
+
+
+```{r}
+library(dplyr)
+library(tibble)
+library(pheatmap)
+
+pivot_m18 <- resume_metiers %>%
+  filter(code_domaine_professionel == "M18") %>%
+  group_by(libelle_rome) %>%
+  summarise(across(c(n_contrainte_forte, n_tech_expert, taux_durabilite,  taux_tension), 
+                   mean, na.rm = TRUE)) %>%
+  column_to_rownames("libelle_rome")
+```
+```{r}
+pheatmap(pivot_m18, scale = "row",
+         main = "Domaine M18 : Systèmes d'information et de télécommunication")
+```
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_metiers_domaine_pro.png", plot = g6, width = 15, height = 8, dpi = 300)
+```
+
+```{r}
+resume_metiers %>%
+  summarise(
+    moyenne = mean(taux_tension, na.rm = TRUE),
+    mediane = median(taux_tension, na.rm = TRUE),
+    minimum = min(taux_tension, na.rm = TRUE),
+    maximum = max(taux_tension, na.rm = TRUE)
+  )
+```
+```{r}
+ggplot(resume_metiers, aes(x = taux_tension)) +
+  geom_histogram(bins = 30, fill = "#2C77B1", color = "white") +
+  labs(
+    title = "Distribution du taux de tension",
+    x = "Taux de tension",
+    y = "Nombre de métiers"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Exemple : top 10 métiers avec le plus haut taux de tension
+g7 <- resume_metiers %>%
+  filter(!is.na(taux_tension)) %>%
+  arrange(desc(taux_tension)) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(x = reorder(libelle_rome, taux_tension), y = taux_tension)) +
+  geom_col(fill = "#E84A5F") +
+  coord_flip() +
+  labs(
+    title = "Top 10 des métiers les plus tendus",
+    x = "Métier",
+    y = "Taux de tension"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggsave("/Users/handinh/Downloads/Projet econometrie2/graphique_taux_tension.png", plot = g7, width = 15, height = 8, dpi = 300)
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
